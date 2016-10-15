@@ -1,69 +1,104 @@
 /*
- * Copyright (c) 2015 GitHub
+ * Licensed to Crate under one or more contributor license agreements.
+ * See the NOTICE file distributed with this work for additional
+ * information regarding copyright ownership.  Crate licenses this file
+ * to you under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
  *
- *     Permission is hereby granted, free of charge, to any person obtaining
- *     a copy of this software and associated documentation files (the "Software"),
- *     to deal in the Software without restriction, including without limitation
- *     the rights to use, copy, modify, merge, publish, distribute, sublicense,
- *     and/or sell copies of the Software, and to permit persons to whom the Software
- *     is furnished to do so, subject to the following conditions:
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *     The above copyright notice and this permission notice shall be included in
- *     all copies or substantial portions of the Software.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.  See the License for the specific language governing
+ * permissions and limitations under the License.
  *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *     IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- *     CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- *     TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
- *     OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * However, if you have executed another commercial license agreement
+ * with Crate these terms will supersede the license and you may use the
+ * software solely pursuant to the terms of the relevant commercial
+ * agreement.
  */
 
 package org.elasticsearch.discovery.srv;
 
+import org.elasticsearch.plugin.discovery.srv.SrvDiscoveryPlugin;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.discovery.srvtest.Constants;
+import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESIntegTestCase;
-import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
+import org.xbill.DNS.*;
+
+import java.io.IOException;
+import java.net.URL;
+import java.util.Collection;
 
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 
-@ClusterScope(scope = ESIntegTestCase.Scope.SUITE, numDataNodes = 0)
+@ESIntegTestCase.ClusterScope(numClientNodes = 0, numDataNodes = 0, transportClientRatio = 0)
 public class SrvDiscoveryIntegrationTest extends ESIntegTestCase {
-    @Test
-    public void testClusterSrvDiscoveryWith2Nodes() throws Exception {
-        Settings.Builder b = settingsBuilder()
-            .put("node.mode", "network")
-            .put("discovery.zen.ping.multicast.enabled", "false")
-            .put("discovery.type", "srvtest")
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_QUERY, Constants.TEST_QUERY);
 
-        assertEquals(cluster().size(), 0);
+    @Before
+    public void prepare() throws Exception {
+        Lookup.setDefaultCache(new MockedZoneCache("elastic.internal."), DClass.IN);
+    }
 
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_0_TRANSPORT_TCP_PORT)).build());
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_1_TRANSPORT_TCP_PORT)).build());
+    @SuppressWarnings("unchecked")
+    @Override
+    protected Collection<Class<? extends Plugin>> nodePlugins() {
+        return pluginList(SrvDiscoveryPlugin.class);
+    }
 
-        assertEquals(cluster().size(), 2);
+    @After
+    public void clearDNSCache() throws Exception {
+        Lookup.setDefaultCache(new Cache(), DClass.IN);
     }
 
     @Test
-    public void testClusterSrvDiscoveryWith5Nodes() throws Exception {
-        Settings.Builder b = settingsBuilder()
+    public void testClusterSrvDiscovery() throws Exception {
+        Settings localSettings = settingsBuilder()
             .put("node.mode", "network")
-            .put("discovery.zen.ping.multicast.enabled", "false")
-            .put("discovery.type", "srvtest")
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_QUERY, Constants.TEST_QUERY);
+            .put("discovery.type", "srv")
+            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_QUERY, "_test._srv.elastic.internal.")
+            .build();
+        internalCluster().startNode(localSettings);
+        internalCluster().startNode(localSettings);
+        internalCluster().startNode(localSettings);
+        internalCluster().ensureAtLeastNumDataNodes(3);
+        internalCluster().ensureAtMostNumDataNodes(3);
+        assertEquals(3, internalCluster().size());
 
-        assertEquals(cluster().size(), 0);
+        internalCluster().stopCurrentMasterNode();
+        internalCluster().ensureAtLeastNumDataNodes(2);
+        internalCluster().ensureAtMostNumDataNodes(2);
+        assertEquals(2, internalCluster().size());
 
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_0_TRANSPORT_TCP_PORT)).build());
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_1_TRANSPORT_TCP_PORT)).build());
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_2_TRANSPORT_TCP_PORT)).build());
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_3_TRANSPORT_TCP_PORT)).build());
-        internalCluster().startNode(b.put("transport.tcp.port", String.valueOf(Constants.NODE_4_TRANSPORT_TCP_PORT)).build());
+        internalCluster().stopRandomNonMasterNode();
+        internalCluster().ensureAtLeastNumDataNodes(1);
+        internalCluster().ensureAtMostNumDataNodes(1);
+        assertEquals(1, internalCluster().size());
+    }
 
-        assertEquals(cluster().size(), 5);
+    private Zone loadZone(String zoneName) throws IOException {
+        String zoneFilename = zoneName + "zone";
+        URL zoneResource = getClass().getResource(zoneFilename);
+        assertNotNull("test resource for zone could not be loaded: " + zoneFilename, zoneResource);
+        String zoneFile = zoneResource.getFile();
+        return new Zone(Name.fromString(zoneName), zoneFile);
+    }
+
+    private final class MockedZoneCache extends Cache {
+
+        Zone zone = null;
+
+        public MockedZoneCache(String string) throws IOException {
+            zone = loadZone(string);
+        }
+
+        public SetResponse lookupRecords(Name arg0, int arg1, int arg2) {
+            return zone.findRecords(arg0, arg1);
+        }
     }
 }

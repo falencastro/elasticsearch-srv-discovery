@@ -30,7 +30,6 @@ import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.discovery.srv.SrvDiscovery;
 import org.elasticsearch.discovery.srv.SrvUnicastHostsProvider;
-import org.elasticsearch.discovery.srvtest.SrvtestDiscovery;
 import org.elasticsearch.discovery.DiscoveryModule;
 import org.elasticsearch.common.inject.Module;
 
@@ -56,7 +55,6 @@ public class SrvDiscoveryPlugin extends Plugin {
 
     public void onModule(DiscoveryModule discoveryModule) {
         discoveryModule.addDiscoveryType("srv", SrvDiscovery.class);
-        discoveryModule.addDiscoveryType("srvtest", SrvtestDiscovery.class);
         discoveryModule.addUnicastHostProvider(SrvUnicastHostsProvider.class);
     }
 
