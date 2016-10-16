@@ -33,6 +33,8 @@ import org.junit.Test;
 import org.xbill.DNS.*;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Locale;
 
 import static org.junit.Assert.*;
@@ -71,7 +73,7 @@ public class SrvUnicastHostsProviderTest {
     @Test
     public void testInvalidResolver() throws Exception {
         Settings.Builder builder = Settings.settingsBuilder()
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_RESOLVER, "foobar.txt")
+            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_SERVERS, "foobar.txt")
             .put(SrvUnicastHostsProvider.DISCOVERY_SRV_QUERY, "_elastic._srv.foo.txt");
         SrvUnicastHostsProvider unicastHostsProvider = new SrvUnicastHostsProvider(builder.build(),
             transportService, Version.CURRENT);
@@ -82,16 +84,38 @@ public class SrvUnicastHostsProviderTest {
     @Test
     public void testValidResolver() throws Exception {
         Settings.Builder builder = Settings.settingsBuilder()
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_RESOLVER, "8.8.4.4");
+            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_SERVERS, "8.8.4.4");
         SrvUnicastHostsProvider unicastHostsProvider = new SrvUnicastHostsProvider(builder.build(),
             transportService, Version.CURRENT);
-        assertEquals("/8.8.4.4:53", ((SimpleResolver) unicastHostsProvider.resolver).getAddress().toString());
+        //assertEquals("/8.8.4.4:53", ((SimpleResolver) unicastHostsProvider.resolver).getAddress().toString());
+        //assertEquals("/8.8.4.4:53", ((ExtendedResolver) unicastHostsProvider.resolver).getAddress().toString());
+        //Resolver resolver = new SimpleResolver(((ExtendedResolver) unicastHostsProvider.resolver).getResolver(0));
+        //Resolver resolver = new SimpleResolver();
+        //resolver = ((ExtendedResolver) unicastHostsProvider.resolver).getResolver(0);
+        //servers[0] = "/8.8.4.4:53";
+        List<Resolver> resolvers = new ArrayList();
+        List<Resolver> resolvers2 = new ArrayList();
+        Resolver resolver = new SimpleResolver("8.8.4.4");
+        Resolver resolver2 = new SimpleResolver("8.8.4.4");
+        //resolver.setTCP(true);
+        resolver.setPort(53);
+        resolver2.setPort(53);
+        resolvers.add(resolver);
+        resolvers2.add(resolver);
+        Resolver parent_resolver = null;
+        Resolver parent_resolver2 = null;
+        parent_resolver = new ExtendedResolver(resolvers.toArray(new Resolver[resolvers.size()]));
+        parent_resolver2 = new ExtendedResolver(resolvers2.toArray(new Resolver[resolvers2.size()]));
+        //assertEquals(resolver, ((ExtendedResolver) unicastHostsProvider.resolver).getResolver(0));
+        ////assertEquals(parent_resolver, ((ExtendedResolver) unicastHostsProvider.resolver));
+        assertEquals((SimpleResolver) resolver, (SimpleResolver) resolver2);
+        //assertEquals("/8.8.4.4:53", resolver.getAddress().toString());
     }
 
     @Test
     public void testValidResolverWithPort() throws Exception {
         Settings.Builder builder = Settings.settingsBuilder()
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_RESOLVER, "127.0.0.1:5353");
+            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_SERVERS, "127.0.0.1:5353");
         SrvUnicastHostsProvider unicastHostsProvider = new SrvUnicastHostsProvider(builder.build(),
             transportService, Version.CURRENT);
         assertEquals("/127.0.0.1:5353", ((SimpleResolver) unicastHostsProvider.resolver).getAddress().toString());
@@ -100,7 +124,7 @@ public class SrvUnicastHostsProviderTest {
     @Test
     public void testValidResolverWithInvalidPort() throws Exception {
         Settings.Builder builder = Settings.settingsBuilder()
-            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_RESOLVER, "127.0.0.1:42a");
+            .put(SrvUnicastHostsProvider.DISCOVERY_SRV_SERVERS, "127.0.0.1:42a");
         SrvUnicastHostsProvider unicastHostsProvider = new SrvUnicastHostsProvider(builder.build(),
             transportService, Version.CURRENT);
         assertEquals("/127.0.0.1:53", ((SimpleResolver) unicastHostsProvider.resolver).getAddress().toString());

@@ -38,6 +38,7 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Collections;
 
 /**
  *
@@ -54,7 +55,7 @@ public class SrvUnicastHostsProvider extends AbstractComponent implements Unicas
     private final Version version;
 
     private final String query;
-    private final Resolver resolver;
+    protected final Resolver resolver;
 
     @Inject
     public SrvUnicastHostsProvider(Settings settings, TransportService transportService, Version version) {
@@ -70,7 +71,9 @@ public class SrvUnicastHostsProvider extends AbstractComponent implements Unicas
     @Nullable
     protected Resolver buildResolver(Settings settings) {
         String[] addresses = settings.getAsArray(DISCOVERY_SRV_SERVERS);
-        logger.debug("Using servers {}", addresses);
+        // Validar o funcionamento com a linha abaixo
+        //logger.debug("Using servers {}", addresses);
+        logger.debug("Using servers {}", (Object[])addresses);
 
         // Use tcp by default since it retrieves all records
         String protocol = settings.get(DISCOVERY_SRV_PROTOCOL, "tcp");
@@ -80,7 +83,8 @@ public class SrvUnicastHostsProvider extends AbstractComponent implements Unicas
 
         for (String address : addresses) {
             String host = null;
-            int port = -1;
+            //int port = -1;
+            int port = 53;
             String[] parts = address.split(":");
             if (parts.length > 0) {
                 host = parts[0];
@@ -132,14 +136,19 @@ public class SrvUnicastHostsProvider extends AbstractComponent implements Unicas
     }
 
     public List<DiscoveryNode> buildDynamicNodes() {
-        List<DiscoveryNode> discoNodes = new ArrayList();
+        //List<DiscoveryNode> discoNodes = new ArrayList();
+
         if (query == null) {
             logger.error("DNS query must not be null. Please set '{}'", DISCOVERY_SRV_QUERY);
-            return discoNodes;
+            return Collections.emptyList();
+            //return discoNodes;
         }
         try {
+            Record[] records = lookupRecords();
             logger.trace("Building dynamic discovery nodes...");
-            discoNodes = lookupNodes();
+            //discoNodes = lookupNodes();
+            List<DiscoveryNode> discoNodes = parseRecords(records);
+            logger.debug("Using dynamic discovery nodes {}", discoNodes);
             if (discoNodes.size() == 0) {
                 logger.debug("No nodes found");
             }
@@ -147,39 +156,37 @@ public class SrvUnicastHostsProvider extends AbstractComponent implements Unicas
             logger.error("Unable to parse DNS query '{}'", query);
             logger.error("DNS lookup exception:", e);
         }
-        logger.debug("Using dynamic discovery nodes {}", discoNodes);
-        return discoNodes;
+        return Collections.emptyList();
     }
 
-    protected List<Record> lookupRecords(String query, int type) throws TextParseException {
-        Lookup lookup = new Lookup(query, type);
+    protected Record[] lookupRecords() throws TextParseException {
+        Lookup lookup = new Lookup(query, Type.SRV);
         if (this.resolver != null) {
             lookup.setResolver(this.resolver);
         }
-
-        Record[] records = lookup.run();
-        return records == null ? new ArrayList<Record>() : Arrays.asList(records);
+        return lookup.run();
     }
+    
+    protected List<DiscoveryNode> parseRecords(Record[] records) {
+        List<DiscoveryNode> discoNodes = new ArrayList<>(records.length);
+        for (Record record : records) {
+            SRVRecord srv = (SRVRecord) record;
 
-    protected List<DiscoveryNode> lookupNodes() throws TextParseException {
-        List<DiscoveryNode> discoNodes = new ArrayList<DiscoveryNode>();
+            String hostname = srv.getTarget().toString().replaceFirst("\\.$", "");
+            int port = srv.getPort();
+            String address = hostname + ":" + port;
 
-        for (Record srvRecord : lookupRecords(query, Type.SRV)) {
-            logger.trace("Found SRV record {}", srvRecord);
-            for (Record aRecord : lookupRecords(((SRVRecord) srvRecord).getTarget().toString(), Type.A)) {
-                logger.trace("Found A record {} for SRV record", aRecord, srvRecord);
-                String address = ((ARecord) aRecord).getAddress().getHostAddress() + ":" + ((SRVRecord) srvRecord).getPort();
-                try {
-                    for (TransportAddress transportAddress : transportService.addressesFromString(address, 1)) {
-                        logger.trace("adding {}, transport_address {}", address, transportAddress);
-                        discoNodes.add(new DiscoveryNode("#srv-" + address + "-" + transportAddress, transportAddress, version.minimumCompatibilityVersion()));
-                    }
-                } catch (Exception e) {
-                    logger.warn("failed to add {}, address {}", e, address);
+            try {
+                TransportAddress[] addresses = transportService.addressesFromString(address, 1);
+                for (TransportAddress transportAddress : addresses) {
+                    logger.trace("adding {}, transport_address {}", address, transportAddress);
+                    discoNodes.add(new DiscoveryNode(
+                        "#srv-" + address, transportAddress, version.minimumCompatibilityVersion()));
                 }
+            } catch (Exception e) {
+                logger.warn("failed to add {}, address {}", e, address);
             }
         }
-
         return discoNodes;
     }
 }
